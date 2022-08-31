@@ -1,5 +1,3 @@
-import matplotlib.pyplot as plt
-from shapely.geometry import Point
 import pandas as pd
 import osmnx as ox
 import networkx as nxx
@@ -68,6 +66,7 @@ man_sample.to_csv('./data/manchester_sample.csv')
 
 from img_retrieve import StreetViewer_random
 from img_retrieve import street_retrieve_random
+from img_retrieve import get_aerial
 
 api_key = " " #put your own google street view api
 
@@ -77,3 +76,14 @@ street_retrieve_random(bristol_sample, bristol_path, api_key)
 
 man_path = "./man_str_img/"
 street_retrieve_random(man_sample, man_path, api_key)
+
+
+
+#download aerial img for bristol and manchester
+api_key = "" #put your bing map api key
+
+bristol_aer_path = "./bristol_aer_img/"
+get_aerial(bristol_sample, bristol_path)
+
+man_aer_path = "./man_aer_img/"
+get_aerial(man_sample, man_path)
