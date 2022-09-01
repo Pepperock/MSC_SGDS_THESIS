@@ -1,0 +1,631 @@
+```{r}
+library(sf)
+library(tidyverse)
+library(here)
+library(tmap)
+```
+
+```{r}
+lsoas <- st_read(here("statistical-gis-boundaries-london", "ESRI", "LSOA_2011_London_gen_MHW.shp"))
+
+lsoa <- lsoas %>% dplyr::select(., c("LSOA11CD", "RGN11CD","LAD11NM", "POPDEN"))
+
+wm <- lsoa %>% filter(LAD11NM == "Westminster")
+
+smpl_wm <- rep(20, nrow(wm))
+
+sampl_wm20 <- st_sample(wm, smpl_wm)
+
+sfc_as_cols <- function(x, geometry, names = c("x","y")) {
+  if (missing(geometry)) {
+    geometry <- sf::st_geometry(x)
+  } else {
+    geometry <- rlang::eval_tidy(enquo(geometry), x)
+  }
+  stopifnot(inherits(x,"sf") && inherits(geometry,"sfc_POINT"))
+  ret <- sf::st_coordinates(geometry)
+  ret <- tibble::as_tibble(ret)
+  stopifnot(length(names) == ncol(ret))
+  x <- x[ , !names(x) %in% names]
+  ret <- setNames(ret,names)
+  dplyr::bind_cols(x,ret)
+}
+
+test1 <- as.vector(as(sampl_wm20, "Spatial")@coords@y)
+
+test2 <- as(sampl_wm20, "Spatial")
+
+test3 <- test2 %>% st_as_sf(.) %>% st_transform(., 4326)
+
+westminster_smpl <- test3 %>% mutate(lon = st_coordinates(.)[,1],
+                                      lat = st_coordinates(.)[,2])
+westmintster_smpl$name <- "westminster"
+westmintster_smpl <- westmintster_smpl %>% st_drop_geometry()
+
+write_csv(westmintster_smpl, "westminster.csv")
+wm <- wm %>% st_transform(., 4326)
+tm_shape(wm)+
+  tm_polygons()+
+  tm_shape(test3)+
+  tm_dots()
+
+
+westminster_smpl <- read_csv(here("westminster.csv"))
+westminster_smpl <- st_as_sf(westminster_smpl, coords = c("lon", "lat"), crs = 4326)
+```
+
+```{r}
+wealthp <- read_csv(here("wealth_dense_prob.csv"))
+livelyp <- read_csv(here("lively_dense_prob.csv"))
+```
+```{r}
+#westminster_smpl$code <- wm$LSOA11CD[unlist(as.integer(st_intersects(westminster_smpl, wm)))]
+t1 <- sort(rep(1:128, 20))
+westminster_smpl$code <- wm$LSOA11CD[t1]
+westminster_smpl$id = c(1:nrow(westminster_smpl))
+wealthp$id <- wealthp$id + 1
+livelyp$id <- livelyp$id + 1
+df1 <- wealthp %>% left_join(.,westminster_smpl, by = c("id"="id"))
+df2 <- df1 %>% left_join(., livelyp, by = c("id" = "id"))
+
+lsoatb <- df2 %>% group_by(code) %>% summarise(avg_lively = mean(lively_prob), avg_wealth = mean(wealth_prob), sd_lively = sd(lively_prob), sd_wealth = sd(wealth_prob))
+```
+```{r}
+wm_attr <- wm %>% left_join(., lsoatb, by = c("LSOA11CD" = "code"))
+```
+
+```{r}
+qtm(wm_attr, fill = "avg_wealth", palette = "RdYlBu")
+```
+
+```{r}
+boroughs <- c("Westminster", "City of London", "Islington", "Hackney", "Camden", "Bexley", "Southwark")
+
+lsoa_select <- lsoa[lsoa$LAD11NM %in% boroughs,]
+
+st_write(lsoa_select, "LSOAs_selected_london.shp")
+```
+
+```{r}
+lsoa_all <- st_read(here('manchester','gb_lsoa11_sim','gb_lsoa11_sim.shp'))
+lsoa_all <- lsoa_all %>% separate(., geo_label, c('city', 'codes', sep = ' '))
+manchester <- lsoa_all %>% filter( city == 'Manchester')
+manchester <- manchester %>% select(., c('geo_code', 'xcoord', 'ycoord'))
+st_write(manchester, 'manchester_lsoa.shp')
+
+test1 <- st_read(here("manchester_lsoa.shp"))
+```
+
+```{r}
+bristol_sample <- read_csv(here("data", "bristol_sample.csv"))
+bristol_prob <- read_csv(here("data", "bristol_pred.csv"))
+```
+
+```{r}
+bristol_sample$id <- c(0:(nrow(bristol_sample)-1))
+bristol_sample$id <- as.character(bristol_sample$id)
+
+bristol_sample_sub <- bristol_sample %>% select(., c('id', 'code'))
+bristol_prob <- bristol_prob %>% select(.,c("id", "safe_prob"))
+bristol_prob$id <- as.character(bristol_prob$id)
+bristol_all <- bristol_prob %>% left_join(.,bristol_sample_sub, by = c("id" = "id"))
+
+bristol_lsoa <- bristol_all %>% group_by(code) %>% summarise(mean = mean(safe_prob), sd = sd(safe_prob))
+
+bristol_shp <- st_read(here("data", "bristol", "lsoa110.shp"))
+bris_geo <- bristol_shp %>% select(.,c("lsoa11cd", "lsoa11ln"))
+
+bristol_geo_prob <- left_join(bris_geo, bristol_lsoa, by = c("lsoa11cd" = "code"))
+
+tm_shape(bristol_geo_prob)+
+  tm_fill('mean', palette = "RdYlBu")
+
+
+```
+```{r}
+tm_shape(bristol_geo_prob)+
+  tm_fill('sd', palette = "RdYlBu")
+
+```
+
+```{r}
+library(janitor)
+imd <- read_csv(here("data", "bristol", "imd2019lsoa.csv"))
+imd_decile <- imd %>% filter(Measurement == 'Decile') %>% clean_names()
+crime <- imd_decile %>% filter(indices_of_deprivation == 'f. Crime Domain')
+crime <- crime %>% select(.,c("feature_code", "value"))
+names(crime) <- c("code", "crime")
+deprivation <- imd_decile %>% filter(indices_of_deprivation == 'a. Index of Multiple Deprivation (IMD)')
+deprivation <- deprivation %>% select(.,c("feature_code", "value"))
+names(deprivation) <- c("code", "deprivation")
+income <- imd_decile %>% filter(indices_of_deprivation == 'b. Income Deprivation Domain')
+
+
+bristol_imd_safe <- left_join(bristol_geo_prob, crime, by = c("lsoa11cd" = "code"))
+bristol_imd_safe <- left_join(bristol_imd_safe, deprivation, by = c("lsoa11cd" = "code"))
+```
+
+
+```{r}
+model1 <- lm(crime~mean + sd, data = bristol_imd_safe)
+summary(model1)
+
+model1 <- lm(deprivation~mean + sd, data = bristol_imd_safe)
+summary(model1)
+
+
+```
+
+```{r}
+library(sf)
+library(here)
+library(tidyverse)
+library(janitor)
+man_data <- st_read(here("man_data.shp")) %>% clean_names()
+bristol_data <- st_read(here("bristol_data.shp")) %>% clean_names()
+
+bristol_sample <- read_csv(here("data","bristol_sample.csv")) %>% clean_names()
+man_sample <- read_csv(here("data", "manchester.csv")) %>% clean_names()
+
+aer <- read_csv(here("data", "bristol_man_aerial_svmprob.csv")) %>% clean_names()
+bristol_aer <- aer %>% filter(city == "Bristol")
+man_aer <- aer %>% filter(city == "Man")
+
+bristol_aer <- bristol_aer %>% select(., -c("x1"))
+aer_b = cbind(bristol_aer, bristol_sample)
+aer_b_avg <- aer_b %>% group_by(code) %>% summarise(safe = mean(svm_safe_prob), wealth = mean(svm_wealth_prob), lively = mean(svm_lively_prob))
+
+bristol_sa_pred <- left_join(bristol_data, aer_b_avg, by = c("code" = "code"))
+
+lm_bristol_aer = bristol_sa_pred %>% lm(data = ., deprvtn~safe + wealth + lively)
+
+lm_bristol_str = bristol_sa_pred %>% lm(data = ., deprvtn~sf_svm_ + wlth_s_ + lvly_s_ )
+summary(lm_bristol_aer)
+library(car)
+vif(lm_bristol_str)
+```
+```{r}
+man_aer <- man_aer %>% select(., -c("x1"))
+aer_m = cbind(man_aer, man_sample)
+aer_m_avg <- aer_m %>% group_by(code) %>% summarise(safe = mean(svm_safe_prob), wealth = mean(svm_wealth_prob), lively = mean(svm_lively_prob))
+
+man_sa_pred <- left_join(man_data, aer_m_avg, by = c("code" = "code"))
+
+lm_man_aer = man_sa_pred %>% lm(data = ., deprvtn~safe + wealth + lively)
+
+summary(lm_man_aer)
+
+lm_man_aer = man_sa_pred %>% lm(data = ., deprvtn~ wealth)
+
+summary(lm_man_aer)
+vif(lm_man_aer)
+man_sa_pred$wlth_s_
+lm_man_str = man_sa_pred %>% lm(data = ., deprvtn~sf_svm_ + wlth_s_ + lvly_s_)
+summary(lm_man_str)
+
+vif(lm_man_str)
+```
+
+```{r}
+ggplot(aes(x = safe), data = man_sa_pred)+
+  geom_histogram()
+
+ggplot(aes(x = wealth), data = man_sa_pred)+
+  geom_histogram()
+ggplot(aes(x = lively), data = man_sa_pred)+
+  geom_histogram()
+
+ggplot(aes(x = sqrt(deprvtn)), data = man_sa_pred)+
+  geom_histogram()
+```
+
+```{r}
+library(spatstat)
+library(sp)
+library(spdep)
+bristol_nb<- bristol_sa_pred %>% poly2nb(., queen = T)
+bristol_lw <- bristol_nb %>% nb2listw(., style = "W")
+
+safe_str <- bristol_sa_pred %>% 
+  pull(lvly_s_) %>% 
+  as.vector() %>% 
+  moran.test(., bristol_lw, zero.policy = T)
+safe_str
+
+safe_aer <- bristol_sa_pred %>% 
+  pull(lively) %>% 
+  as.vector() %>% 
+  moran.test(., bristol_lw, zero.policy = T)
+safe_aer
+
+
+man_nb<- man_sa_pred2 %>% poly2nb(., queen = T)
+man_sa_pred2 <- man_sa_pred[!st_is_empty(man_sa_pred$geometry),]
+man_lw <- man_nb %>% nb2listw(., style = "W")
+man_sa_pred2 %>% 
+  pull(lvly_s_) %>% 
+  as.vector() %>% 
+  moran.test(., man_lw, zero.policy = T)
+safe_aer
+```
+
+```{r}
+pred1 = read_csv(here("data", "bristol_man_svm.csv")) %>% clean_names()
+pred2 = read_csv(here("data", "bristol_man_xgb.csv")) %>% clean_names() %>%  select(., -c(x1,indices))
+bm_data = cbind(pred1, pred2)
+
+bm_data <- bm_data %>% select(., c(svm_safe_prob, svm_wealth_prob,svm_lively_prob, xgb_safe_prob, xgb_wealth_prob, xgb_lively_prob))
+ggplot(aes(x = svm_safe_prob), data = bm_data) +
+  geom_histogram(binwidth = 0.01, fill = 'red3', color = '#e9ecef', alpha = 0.8)+
+  #ggtitle('Distribution of SVM Probability Scores')+
+  xlab('SVM Probability Scores')+
+  ylab('Frequencies')+
+  theme_classic()
+ggplot(aes(x = xgb_safe_prob), data = bm_data) +
+  geom_histogram()
+
+ggplot(aes(x = xgb_safe_prob), data = bm_data) +
+  geom_histogram(binwidth = 0.01, fill = 'red3', color = '#e9ecef', alpha = 0.8)+
+  #ggtitle('Distribution of SVM Probability Scores')+
+  xlab('SVM Probability Scores')+
+  ylab('Frequencies')+
+  theme_classic()
+ggplot(aes(x = xgb_safe_prob), data = bm_data) +
+  geom_histogram()
+
+$safeM <- lm()
+```
+```{r}
+col_brk <- c(0, 0.1, 0.2,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1)
+p1 <- tm_shape(bristol_sa_pred)+
+  tm_fill('sf_svm', title = "Safety", palette = 'Greens', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('right', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+p2 <- tm_shape(bristol_sa_pred)+
+  tm_fill('wlth_s', title = "Wealth", palette = 'Blues', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('right', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+p3 <- tm_shape(bristol_sa_pred)+
+  tm_fill('lvly_s', title = "Lively", palette = 'Oranges', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('right', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+
+
+p4 <- tm_shape(bristol_sa_pred)+
+  tm_fill('safe', title = "Safety", palette = 'Greens', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('right', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+
+p5 <- tm_shape(bristol_sa_pred)+
+  tm_fill('wealth', title = "Wealth", palette = 'Blues', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('right', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+ 
+p6 <- tm_shape(bristol_sa_pred)+
+  tm_fill('lively', title = "Lively", palette = 'Oranges', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('right', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width =0.1)+
+  tm_layout(frame = F)
+
+bristolppp <- tmap_arrange(p1,p2,p3,p4,p5,p6, nrow = 2)
+tmap_save(bristolppp, "bristolmaps.png", width = 16, height = 9, dpi = 400)
+```
+```{r}
+p1 <- tm_shape(man_sa_pred2)+
+  tm_fill('sf_svm', title = "Safety", palette = 'Greens', breaks = col_brk, style =  "cont")+
+  tm_compass(position = c('left', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+p2 <- tm_shape(man_sa_pred2)+
+  tm_fill('wlth_s', title = "Wealth", palette = 'Blues', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('left', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+p3 <- tm_shape(man_sa_pred2)+
+  tm_fill('lvly_s', title = "Lively", palette = 'Oranges', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('left', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+
+
+p4 <- tm_shape(man_sa_pred2)+
+  tm_fill('safe', title = "Safety", palette = 'Greens', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('left', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+
+p5 <- tm_shape(man_sa_pred2)+
+  tm_fill('wealth', title = "Wealth", palette = 'Blues', breaks = col_brk, style = "cont")+
+  tm_compass(position = c('left', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+ 
+p6 <- tm_shape(man_sa_pred2)+
+  tm_fill('lively', title = "Lively", palette = 'Oranges', breaks = col_brk, style = 'cont')+
+  tm_compass(position = c('left', 'top'))+
+  tm_scale_bar(position = c("right", "bottom"), width =0.1)+
+  tm_layout(frame = F)
+
+manppp <- tmap_arrange(p1,p2,p3,p4,p5,p6, nrow = 2)
+tmap_save(manppp, "manchestermaps.png", width = 16, height = 9, dpi = 400)
+```
+```{r}
+library(sp)
+library(spdep)
+bristol_safe_localm <- bristol_sa_pred %>% 
+  pull(sf_svm) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_safe_localm2 <- bristol_sa_pred %>% 
+  pull(safe) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_wealth_localm <- bristol_sa_pred %>% 
+  pull(wlth_s) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_wealth_localm2 <- bristol_sa_pred %>% 
+  pull(wealth) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_lively_localm <- bristol_sa_pred %>% 
+  pull(lvly_s) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_lively_localm2 <- bristol_sa_pred %>% 
+  pull(lively) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+
+
+breaks1 <- c(-1000, -2.58, -1.96, -1.65, 1.65, 1.96,2.58, 1000)
+bristol_Sa_pred2 <- bristol_sa_pred
+bristol_safe_li<- bristol_Sa_pred2 %>% 
+  mutate(safe_i = as.numeric(bristol_safe_localm$Ii)) %>% 
+  mutate(safe_iz = as.numeric(bristol_safe_localm$Z.Ii)) %>% 
+  mutate(aer_safe_iz = as.numeric(bristol_safe_localm2$Z.Ii)) %>% 
+  mutate(wealth_iz = as.numeric(bristol_wealth_localm$Z.Ii)) %>% 
+  mutate(aer_wealth_iz = as.numeric(bristol_wealth_localm2$Z.Ii)) %>% 
+  mutate(lively_iz = as.numeric(bristol_lively_localm$Z.Ii)) %>% 
+  mutate(aer_lively_iz = as.numeric(bristol_lively_localm2$Z.Ii))
+
+morancolour <- rev(brewer.pal(8, "RdGy"))
+
+bristol_lisa_safe_str<-tm_shape(bristol_safe_li)+
+  tm_fill("safe_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tmap_save(bristol_lisa_safe_str, "bristol_lisa_safe_str.png")
+
+bristol_lisa_safe_aer <-tm_shape(bristol_safe_li)+
+  tm_fill("aer_safe_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tmap_save(bristol_lisa_safe_aer, "bristol_lisa_safe_Aer.png")
+
+tm_shape(bristol_safe_li)+
+  tm_fill("lively_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tm_shape(bristol_safe_li)+
+  tm_fill("aer_wealth_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tm_shape(bristol_safe_li)+
+  tm_fill("lively_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tm_shape(bristol_safe_li)+
+  tm_fill("aer_lively_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tmap_save(bristol_lisa_safe_aer, "bristol_lisa_safe_Aer.png")
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+bristol_safe_localm <- bristol_sa_pred %>% 
+  pull(sf_svm) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_safe_localm2 <- bristol_sa_pred %>% 
+  pull(safe) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_wealth_localm <- bristol_sa_pred %>% 
+  pull(wlth_s) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_wealth_localm2 <- bristol_sa_pred %>% 
+  pull(wealth) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_lively_localm <- bristol_sa_pred %>% 
+  pull(lvly_s) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+bristol_lively_localm2 <- bristol_sa_pred %>% 
+  pull(lively) %>% 
+  as.vector() %>% 
+  localmoran(., bristol_lw) %>% 
+  as_tibble()
+
+
+breaks1 <- c(-1000, -2.58, -1.96, -1.65, 1.65, 1.96,2.58, 1000)
+bristol_Sa_pred2 <- bristol_sa_pred
+bristol_safe_li<- bristol_Sa_pred2 %>% 
+  mutate(safe_i = as.numeric(bristol_safe_localm$Ii)) %>% 
+  mutate(safe_iz = as.numeric(bristol_safe_localm$Z.Ii)) %>% 
+  mutate(aer_safe_iz = as.numeric(bristol_safe_localm2$Z.Ii)) %>% 
+  mutate(wealth_iz = as.numeric(bristol_wealth_localm$Z.Ii)) %>% 
+  mutate(aer_wealth_iz = as.numeric(bristol_wealth_localm2$Z.Ii)) %>% 
+  mutate(lively_iz = as.numeric(bristol_lively_localm$Z.Ii)) %>% 
+  mutate(aer_lively_iz = as.numeric(bristol_lively_localm2$Z.Ii))
+
+morancolour <- rev(brewer.pal(8, "RdGy"))
+
+bristol_lisa_safe_str<-tm_shape(bristol_safe_li)+
+  tm_fill("safe_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tmap_save(bristol_lisa_safe_str, "bristol_lisa_safe_str.png")
+
+bristol_lisa_safe_aer <-tm_shape(bristol_safe_li)+
+  tm_fill("aer_safe_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tmap_save(bristol_lisa_safe_aer, "bristol_lisa_safe_Aer.png")
+
+tm_shape(bristol_safe_li)+
+  tm_fill("lively_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tm_shape(bristol_safe_li)+
+  tm_fill("aer_wealth_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tm_shape(bristol_safe_li)+
+  tm_fill("lively_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tm_shape(bristol_safe_li)+
+  tm_fill("aer_lively_iz",
+              breaks = breaks1,
+              palette = morancolour,
+              midpoint = NA,
+              title = "Significance of Local Moran's I")+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+tmap_save(bristol_lisa_safe_aer, "bristol_lisa_safe_Aer.png")
+```
+
+
+```{r}
+mean(bristol_sa_pred$sf_svm)
+sd(bristol_sa_pred$sf_svm)
+
+mean(bristol_sa_pred$safe)
+sd(bristol_sa_pred$safe)
+
+
+mean(bristol_sa_pred$wlth_s)
+sd(bristol_sa_pred$wlth_s)
+
+mean(bristol_sa_pred$wealth)
+sd(bristol_sa_pred$wealth)
+
+mean(bristol_sa_pred$lvly_s)
+sd(bristol_sa_pred$lvly_s)
+
+mean(bristol_sa_pred$lively)
+sd(bristol_sa_pred$lively)
+
+t.test(bristol_sa_pred$lvly_s, bristol_sa_pred$lively)
+```
+```{r}
+brk <- c(0,1,2,3,4,5,6,7,8,9,10)
+labels <- c("1","2","3", "4","5", "6", "7", "8", "9", "10")
+bristolIMD<-tm_shape(bristol_data)+
+  tm_fill("deprvtn", palette = "RdBu", breaks = brk, labels = labels, title = "IMD Decile")+
+  tm_shape(bristol_data)+
+  tm_polygons(alpha = 0, border.col = "white", border.width = 0.01)+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+
+tmap_save(bristolIMD, "BristolIMD.png", dpi = 300, width = 5, height = 5.5)
+
+brk <- c(0,1,2,3,4,5,6,7,8,9,10)
+labels <- c("1","2","3", "4","5", "6", "7", "8", "9", "10")
+manIMD<-tm_shape(man_sa_pred2)+
+  tm_fill("deprvtn", palette = "RdBu", breaks = brk, labels = labels, title = "IMD Decile")+
+  tm_shape(man_sa_pred2)+
+  tm_polygons(alpha = 0, border.col = "white", border.width = 0.01)+
+  tm_compass(position = c("right", "top"))+
+  tm_scale_bar(position = c("right", "bottom"), width = 0.1)+
+  tm_layout(frame = F)
+
+tmap_save(manIMD, "manIMD.png", dpi = 300, width = 5, height = 5.5)
+```
+

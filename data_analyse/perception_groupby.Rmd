@@ -1,0 +1,154 @@
+```{r}
+library(here)
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+vote <- read_csv(here("votes_clean.csv"))
+#london_left <- vote %>% filter(place_name_left == "London")
+#london_right <- vote %>% filter(place_name_right == "London")
+
+```
+
+```{r}
+safe <- vote[vote$study_question == "safer",]
+wealth <- vote[vote$study_question == "wealthier",]
+safeleft <- safe %>% select(., c("left", "choice"))
+saferight <- safe %>% select(., c("right", "choice"))
+```
+
+```{r}
+safeleft$good <- 0
+safeleft$bad <- 0
+safeleft$equal <- 0
+
+safeleft$good[safeleft$choice == "left"] <- 1
+safeleft$bad[safeleft$choice == "right"] <- 1
+safeleft$equal[safeleft$choice == "equal"] <- 1
+
+safe_lf <- safeleft %>% group_by(left) %>% summarise(posi = sum(good), nega = sum(bad), eq = sum(equal))
+```
+
+```{r}
+saferight$good <- 0
+saferight$bad <- 0
+saferight$equal <- 0
+
+saferight$good[saferight$choice == "right"] <- 1
+saferight$bad[saferight$choice == "left"] <- 1
+saferight$equal[saferight$choice == "equal"] <- 1
+
+safe_rg <- saferight %>% group_by(right) %>% summarise(posi = sum(good), nega = sum(bad), eq = sum(equal))
+```
+
+```{r}
+names(safe_lf) <- c("id", "posi", "nega", "eq")
+names(safe_rg) <- c("id", "posi", "nega", "eq")
+safe_df <- rbind(safe_lf, safe_rg)
+safe_df <- safe_df %>% group_by(id) %>% summarise(posi = sum(posi), nega = sum(nega), eq = sum(eq))
+safe_df$pi <- safe_df$posi/(safe_df$posi + safe_df$nega +safe_df$eq)
+safe_df$ni <- 1 - safe_df$pi
+
+write_csv(safe_df, "safety.csv")
+safetable <- safe %>% select(., c("left", "right", "choice"))
+write_csv(safetable, "safetb.csv")
+```
+
+# Get London places with locations 
+```{r}
+london_lf_safe <- safe %>% filter(place_name_left == "London")
+london_rg_safe <- safe %>% filter(place_name_right == "London")
+london_safe_lf1 <- london_lf_safe %>% select(., c("left", "long_left", "lat_left"))
+london_safe_rg1 <- london_rg_safe %>% select(., c("right", "long_right", "lat_right"))
+
+names(london_safe_lf1) <- c("id", "lon", "lat")
+names(london_safe_rg1) <- c("id", "lon", "lat")
+
+london_safe_loc <- rbind(london_safe_lf1, london_safe_rg1)
+write_csv(london_safe_loc, "london_safe_loc.csv")
+```
+
+
+
+```{r}
+safe_lf1 <- safe %>% select(., c("left", "long_left", "lat_left"))
+safe_rg1 <- safe %>% select(., c("right", "long_right", "lat_right"))
+
+names(safe_lf1) <- c("id", "lon", "lat")
+names(safe_rg1) <- c("id", "lon", "lat")
+
+safe_loc <- rbind(safe_lf1, safe_rg1)
+names(safe_loc) <- c("id", "lat", "lon")
+safe_loc <- safe_loc %>% distinct(id, .keep_all = T)
+write_csv(safe_loc, "safe_loc.csv")
+```
+
+
+
+
+```{r}
+wealth <- vote[vote$study_question == "wealthier",]
+wealthleft <- wealth %>% select(., c("left", "choice"))
+wealthright <- wealth %>% select(., c("right", "choice"))
+```
+```{r}
+wealthright$good <- 0
+wealthright$bad <- 0
+wealthright$equal <- 0
+
+wealthright$good[wealthright$choice == "right"] <- 1
+wealthright$bad[wealthright$choice == "left"] <- 1
+wealthright$equal[wealthright$choice == "equal"] <- 1
+
+wealth_rg <- wealthright %>% group_by(right) %>% summarise(posi = sum(good), nega = sum(bad), eq = sum(equal))
+
+wealthleft$good <- 0
+wealthleft$bad <- 0
+wealthleft$equal <- 0
+
+wealthleft$good[wealthleft$choice == "left"] <- 1
+wealthleft$bad[wealthleft$choice == "right"] <- 1
+wealthleft$equal[wealthleft$choice == "equal"] <- 1
+
+wealth_lf <- wealthleft %>% group_by(left) %>% summarise(posi = sum(good), nega = sum(bad), eq = sum(equal))
+```
+```{r}
+names(wealth_lf) <- c("id", "posi", "nega", "eq")
+names(wealth_rg) <- c("id", "posi", "nega", "eq")
+wealth_df <- rbind(wealth_lf, wealth_rg)
+wealth_df <- wealth_df %>% group_by(id) %>% summarise(posi = sum(posi), nega = sum(nega), eq = sum(eq))
+wealth_df$pi <- wealth_df$posi/(wealth_df$posi + wealth_df$nega +wealth_df$eq)
+wealth_df$ni <- 1 - wealth_df$pi
+
+write_csv(wealth_df, "wealth.csv")
+wealthtable <- wealth %>% select(., c("left", "right", "choice"))
+write_csv(wealthtable, "wealthtb.csv")
+```
+
+
+```{r}
+london_lf_wealth <- wealth %>% filter(place_name_left == "London")
+london_rg_wealth <- wealth %>% filter(place_name_right == "London")
+london_wealth_lf1 <- london_lf_wealth %>% select(., c("left", "long_left", "lat_left"))
+london_wealth_rg1 <- london_rg_wealth %>% select(., c("right", "long_right", "lat_right"))
+
+names(london_wealth_lf1) <- c("id", "lon", "lat")
+names(london_wealth_rg1) <- c("id", "lon", "lat")
+
+london_wealth_loc <- rbind(london_wealth_lf1, london_wealth_rg1)
+write_csv(london_wealth_loc, "london_wealth_loc.csv")
+```
+
+```{r}
+wealth_lf1 <- wealth %>% select(., c("left", "long_left", "lat_left"))
+wealth_rg1 <- wealth %>% select(., c("right", "long_right", "lat_right"))
+
+names(wealth_lf1) <- c("id", "lon", "lat")
+names(wealth_rg1) <- c("id", "lon", "lat")
+
+wealth_loc <- rbind(wealth_lf1, wealth_rg1)
+wealth_loc <- wealth_loc %>% distinct(id, .keep_all = T)
+write_csv(wealth_loc, "wealth_loc.csv")
+```
+
